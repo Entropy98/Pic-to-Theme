@@ -2,12 +2,32 @@ import sys
 import numpy
 import math
 import copy
+from pathlib import Path
 from PIL import Image
 from matplotlib import pyplot as plt
 
 MAX_DIFF=100
 
 DEFAULT_COLORS = [0x000000, 0x770000, 0x007700, 0x777700, 0x000077, 0x770077, 0x007777, 0xaaaaaa, 0x555555, 0xcc0000, 0x00cc00, 0xcccc00, 0x0000cc, 0xcc00cc, 0x00cccc, 0xffffff]
+
+CONTRAST_LUT = {
+        0: 15,
+        1: 14,
+        2: 13,
+        3: 12,
+        4: 11,
+        5: 10,
+        6: 9,
+        7: 0,
+        8: 15,
+        9: 6,
+        10: 5,
+        11: 4,
+        12: 3,
+        13: 2,
+        14: 1,
+        15: 0
+        }
 
 def compare_colors(c1, c2):
     '''
@@ -57,11 +77,11 @@ def main():
     num_colors = len(DEFAULT_COLORS)
 
     colors = set()
-    #flatten image
     for x in range(max_x):
         for y in range(max_y):
             colors.add(integerize_color(img[x][y]))
 
+    #Match XTerm colors
     color_record = [-1]*num_colors
     new_colors = copy.copy(DEFAULT_COLORS)
     for color in colors:
@@ -72,8 +92,45 @@ def main():
                     color_record[i] = color_diff
                     new_colors[i] = color
 
+    color_count = [0]*16
+    #Find most used color
+    for x in range(max_x):
+        for i in range(num_colors):
+            color_count[i] = (img[x] == new_colors[i]).sum()
+    greatest_color = color_count.index(max(color_count))
+    bg = new_colors[greatest_color]
+    fg = new_colors[CONTRAST_LUT[greatest_color]]
+
+    #write .Xresources
+    f = open('.Xresources','w')
+    f.write('*.foreground: {}\n'.format(colorize_color(fg)))
+    f.write('*.background: {}\n'.format(colorize_color(bg)))
+    f.write('*.cursorColor: {}\n'.format(colorize_color(fg)))
+    for i in range(num_colors):
+        f.write("*.color{0}: {1}\n".format(i,colorize_color(new_colors[i])))
+    f.close()
+
+    #write gnome terminal script
+    f = open('update_gterm.sh','w')
+    f.write('#!/bin/bash\n')
+    f.write('mv .Xresources ~/\n')
+    f.write("gsettings set org.gnome.Terminal.Legacy.Profile:/org/gnome/terminal/legacy/profiles:/:ad573cac-cd69-44d4-9713-7526db576454/ palette ")
+    f.write('"[')
     for color in new_colors:
-        print(colorize_color(color))
+        rgb = seperate_color(color)
+        f.write("'rgb({},{},{})'".format(rgb[0],rgb[1],rgb[2]))
+        if(color != new_colors[-1]):
+            f.write(",")
+    f.write(']"\n')
+    fg_rgb = seperate_color(fg)
+    f.write("gsettings set org.gnome.Terminal.Legacy.Profile:/org/gnome/terminal/legacy/profiles:/:ad573cac-cd69-44d4-9713-7526db576454/ foreground-color 'rgb({},{},{})'\n".format(fg_rgb[0],fg_rgb[1],fg_rgb[2]))
+    bg_rgb = seperate_color(bg)
+    f.write("gsettings set org.gnome.Terminal.Legacy.Profile:/org/gnome/terminal/legacy/profiles:/:ad573cac-cd69-44d4-9713-7526db576454/ background-color 'rgb({},{},{})'\n".format(bg_rgb[0],bg_rgb[1],bg_rgb[2]))
+    f.write("gsettings set org.gnome.Terminal.Legacy.Profile:/org/gnome/terminal/legacy/profiles:/:ad573cac-cd69-44d4-9713-7526db576454/ cursor-foreground-color 'rgb({},{},{})'\n".format(fg_rgb[0],fg_rgb[1],fg_rgb[2]))
+    f.write("gsettings set org.gnome.Terminal.Legacy.Profile:/org/gnome/terminal/legacy/profiles:/:ad573cac-cd69-44d4-9713-7526db576454/ cursor-background-color 'rgb({},{},{})'\n".format(fg_rgb[0],fg_rgb[1],fg_rgb[2]))
+    f.write("gsettings set org.gnome.Terminal.Legacy.Profile:/org/gnome/terminal/legacy/profiles:/:ad573cac-cd69-44d4-9713-7526db576454/ highlight-background-color 'rgb({},{},{})'\n".format(fg_rgb[0],fg_rgb[1],fg_rgb[2]))
+    f.write("gsettings set org.gnome.Terminal.Legacy.Profile:/org/gnome/terminal/legacy/profiles:/:ad573cac-cd69-44d4-9713-7526db576454/ highlight-foreground-color 'rgb({},{},{})'\n".format(bg_rgb[0],bg_rgb[1],bg_rgb[2]))
+
 
 if __name__ == '__main__':
     main()
