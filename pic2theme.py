@@ -105,11 +105,11 @@ def colorize_color(c: HexColor | numpy.int64) -> ColorString:
     return '#'+c
 
 
-def seperate_color(c: HexColor) -> List[RGBVal]:
+def seperate_color(c: HexColor) -> RGBVal:
     '''
     @brief  converts integer color into array of RGB values
     @param  int c - int(0xRRGGBB)
-    @returns List[RGBVal] c - color
+    @returns RGBVal c - color
     '''
     red: RGBVal = (c & 16711680) >> 16
     green: RGBVal = (c & 65280) >> 8
@@ -136,15 +136,15 @@ def display_image(img: ImgPath) -> None:
     subprocess.run(["imgcat", img])
 
 
-def compile_colors(max_x: int, max_y: int, img: Img) -> Set[HexColor]:
+def compile_colors(img: Img) -> Set[HexColor]:
     '''
     @brief determines which colors from the image should go into the 16 color list
-    @param int max_x - number of columnss in the image
-    @param int max_y - number of rows in the image
     @param Img img - image to parse
     @returns Set of every color in the image
     '''
     percent_done: int = 0
+    max_x: int = len(img)
+    max_y: int = len(img[0])
 
     print("Compiling Colors")
     colors: Set[HexColor] = set()
@@ -157,16 +157,17 @@ def compile_colors(max_x: int, max_y: int, img: Img) -> Set[HexColor]:
     return colors
 
 
-def analyze_colors(colors: Set[HexColor]) -> ColorList:
+def analyze_colors(colors: Set[HexColor]) -> Tuple[ColorList, List[int]]:
     '''
     @brief determines the foreground and background based on the prominance of colors in the image
     @param Set[HexColor] colors - colors to fit into a 16 color list
-    @returns 16 color list
+    @returns (16 color list, list of color occurances)
     '''
     percent_done: int = 0
 
     print("Analyzing Colors")
     color_record: List[int] = [-1]*NUM_COLORS
+    color_prominence: List[int] = [0]*NUM_COLORS
     new_colors: ColorList = copy.copy(DEFAULT_COLORS)
     color_index: int = 0
     for color in colors:
@@ -175,27 +176,26 @@ def analyze_colors(colors: Set[HexColor]) -> ColorList:
             print_loading_bar(percent_done)
             color_diff: int = compare_colors(seperate_color(DEFAULT_COLORS[i]), seperate_color(color))
             if (color_diff < args.max_diff):
+                color_prominence[i] = color_prominence[i] + 1
                 if (color_record[i] == -1 or color_diff < color_record[i]):
-                    if (args.verbose >= 4):
+                    if (args.verbose >= 5):
                         print(f"Found better {ANSICOLORS[i]}{colorize_color(DEFAULT_COLORS[i])}{ANSICOLOR_RESET}! New color is {ANSICOLORS[i]}{colorize_color(color)}{ANSICOLOR_RESET}")
                     color_record[i] = color_diff
                     new_colors[i] = color
         color_index += 1
     print("\nDone")
-    return new_colors
+    return (new_colors, color_prominence)
 
 
-def determine_background(colors: ColorList, img: Img, bg_override: int) -> Tuple[HexColor, HexColor]:
+def determine_background(colors: ColorList, prominance: List[int], bg_override: int) -> Tuple[HexColor, HexColor]:
     '''
     @brief determines the background color based on the prominance of colors in the image
     @param ColorList colors - 16 color list based on img
-    @param Img img - image to base the background and foreground on
     @param int bg_override - color in 16 color list to set color to
     @returns tuple(bg, fg) of the background and foreground
     '''
     bg: HexColor = DEFAULT_COLORS[0]
     fg: HexColor = DEFAULT_COLORS[7]
-    color_count: List[int] = [0]*16
 
     if ((16 > bg_override) and (bg_override >= 0)):
         if (args.verbose >= 1):
@@ -203,20 +203,13 @@ def determine_background(colors: ColorList, img: Img, bg_override: int) -> Tuple
         bg = colors[bg_override]
         fg = colors[CONTRAST_LUT[bg_override]]
     else:
-        # Find most used color
-        print("Deciding on Background Color")
-        for x in range(max_x):
-            for i in range(NUM_COLORS):
-                percent_done = int(100*(x*NUM_COLORS+i)/(max_x*NUM_COLORS))
-                print_loading_bar(percent_done)
-                color_count[i] = (img[x] == colors[i]).sum()
-        greatest_color = color_count.index(max(color_count))
+        greatest_color = prominance.index(max(prominance))
         if (args.verbose >= 2):
-            print(f"\nMaking {colorize_color(colors[greatest_color])} the background because it is the most prevalent")
+            print(f"\nMaking {ANSICOLORS[greatest_color]}{colorize_color(colors[greatest_color])}{ANSICOLOR_RESET} the background because it is the most prevalent")
         if (args.verbose >= 3):
             print("Color Rankings:")
             for i in range(NUM_COLORS):
-                print(f"\t{ANSICOLORS[i]}{colorize_color(colors[i])}{ANSICOLOR_RESET}:{color_count[i]}")
+                print(f"\t{ANSICOLORS[i]}{colorize_color(colors[i])}{ANSICOLOR_RESET}:{prominance[i]}")
         bg = colors[greatest_color]
         fg = colors[CONTRAST_LUT[greatest_color]]
         print("\nDone")
@@ -290,14 +283,13 @@ if __name__ == '__main__':
     print(f"Creating theme from {args.image_file}")
     display_image(ImgPath(args.image_file))
 
-    max_x: int = len(img)
-    max_y: int = len(img[0])
-
-    colors: Set[HexColor] = compile_colors(max_x, max_y, img)
-    new_colors: ColorList = analyze_colors(colors)
+    colors: Set[HexColor] = compile_colors(img)
+    new_colors: ColorList
+    color_prominence: List[int]
+    new_colors, color_prominence = analyze_colors(colors)
 
     bg: HexColor
     fg: HexColor
-    bg, fg = determine_background(new_colors, img, args.background)
+    bg, fg = determine_background(new_colors, color_prominence, args.background)
     compile_xresources(bg, fg, new_colors)
     compile_update_script(bg, fg, new_colors)
