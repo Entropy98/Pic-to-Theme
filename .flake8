@@ -1,0 +1,2 @@
+[flake8]
+per-file-ignores = pic2theme.py: E501
